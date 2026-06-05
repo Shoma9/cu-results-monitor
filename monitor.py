@@ -1,52 +1,40 @@
-import requests
-from bs4 import BeautifulSoup
-import os
-
-# --- Configuration via Environment Variables ---
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-STATE_FILE = "announced_results.txt"
-URL = "http://www.results.eng.cu.edu.eg/"
-
-def send_telegram_message(text):
-    api_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    try:
-        payload = {'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'HTML'}
-        response = requests.post(api_url, json=payload)
-        if response.status_code != 200:
-            print(f"Telegram error: {response.text}")
-    except Exception as e:
-        print(f"Failed to send message: {e}")
-
-def load_announced_results():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return set(line.strip() for line in f if line.strip())
-    return set()
-
-def save_all_announced_results(announced_set):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        for item in sorted(announced_set):
-            f.write(f"{item}\n")
-
 def main():
     print("Running smart results monitor...")
     
     # 1. Load historical memory
     previous_results = load_announced_results()
     
-    # 2. Scrape the website (Updated with Headers and 60s Timeout)
+    # 2. Scrape the website via Proxy Bypasses
+    rows = []
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        print("Connecting to the university portal...")
-        response = requests.get(URL, headers=headers, timeout=60)
+        
+        print("Attempting to bypass firewall using Proxy...")
+        # We route the URL through a free public proxy to hide GitHub's IP address
+        proxy_url = f"https://api.allorigins.win/raw?url={URL}"
+        
+        response = requests.get(proxy_url, headers=headers, timeout=60)
         soup = BeautifulSoup(response.content, 'html.parser')
         rows = soup.find_all('tr')
+        
+        # If the proxy fails to grab the table, it will trigger an error
+        if len(rows) < 2:
+            raise ValueError("No table found via proxy.")
+            
     except Exception as e:
-        print(f"Error fetching or parsing the website: {e}")
-        return
+        print(f"Proxy bypass failed: {e}")
+        print("Attempting secondary bypass route...")
+        try:
+            # Fallback to a second free proxy just in case the first one is blocked
+            proxy_url_2 = f"https://api.codetabs.com/v1/proxy?quest={URL}"
+            response = requests.get(proxy_url_2, headers=headers, timeout=60)
+            soup = BeautifulSoup(response.content, 'html.parser')
+            rows = soup.find_all('tr')
+        except Exception as e2:
+            print(f"Total connection failure. The university server is likely completely down or blocking all proxies: {e2}")
+            return
 
     year_columns = {
         1: "الفرقة الأولي",
