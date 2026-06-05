@@ -35,9 +35,13 @@ def main():
     # 1. Load historical memory
     previous_results = load_announced_results()
     
-    # 2. Scrape the website
+    # 2. Scrape the website (Updated with Headers and 60s Timeout)
     try:
-        response = requests.get(URL, timeout=15)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        print("Connecting to the university portal...")
+        response = requests.get(URL, headers=headers, timeout=60)
         soup = BeautifulSoup(response.content, 'html.parser')
         rows = soup.find_all('tr')
     except Exception as e:
