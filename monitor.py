@@ -15,7 +15,7 @@ def send_telegram_message(text):
     requests.post(api_url, json=payload)
 
 async def main():
-    print("بدء عملية الفحص باستخدام متصفح حقيقي...")
+    print("بدء محاولة الفحص (المتصفح المموه)...")
     
     # تحميل الذاكرة السابقة
     previous_results = set()
@@ -23,16 +23,19 @@ async def main():
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             previous_results = set(line.strip() for line in f if line.strip())
 
-    # فتح المتصفح
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        # تشغيل المتصفح مع بصمة متصفح حقيقية (Firefox) لتجاوز جدار الحماية
+        browser = await p.firefox.launch(headless=True)
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
+        page = await context.new_page()
+        
         try:
-            await page.goto(URL, timeout=60000, wait_until="networkidle")
+            # انتظار تحميل DOM فقط لضمان السرعة مع زيادة وقت الانتظار
+            await page.goto(URL, timeout=120000, wait_until="domcontentloaded")
             content = await page.content()
             soup = BeautifulSoup(content, 'html.parser')
         except Exception as e:
-            print(f"فشل تحميل الصفحة: {e}")
+            print(f"فشل التحميل بعد محاولات: {e}")
             return
         finally:
             await browser.close()
@@ -41,7 +44,6 @@ async def main():
     current_visible_results = set()
     new_releases = []
     
-    # تحليل البيانات
     year_columns = {1: "الفرقة الأولي", 2: "الفرقة الثانية", 3: "الفرقة الثالثة", 4: "الفرقة الرابعة"}
     for row in rows:
         cells = row.find_all(['td', 'th'])
@@ -64,7 +66,7 @@ async def main():
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             for item in sorted(current_visible_results): f.write(f"{item}\n")
     else:
-        print("لا توجد نتائج جديدة.")
+        print("Scan complete. لا توجد نتائج جديدة.")
 
 if __name__ == "__main__":
     asyncio.run(main())
