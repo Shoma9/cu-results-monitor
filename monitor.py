@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 import os
+import time
+import random
 
 # --- Configuration via Environment Variables ---
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -29,40 +31,54 @@ def save_all_announced_results(announced_set):
         for item in sorted(announced_set):
             f.write(f"{item}\n")
 
+def fetch_with_proxy(proxy_format, headers):
+    # إضافة رقم عشوائي لكسر الـ Cache وإجبار البروكسي على جلب نسخة جديدة
+    cache_buster = f"?nocache={random.randint(10000, 99999)}"
+    target_url = URL + cache_buster
+    proxy_url = proxy_format.replace("TARGET_URL", target_url)
+    
+    response = requests.get(proxy_url, headers=headers, timeout=60)
+    response.raise_for_status() 
+    soup = BeautifulSoup(response.content, 'html.parser')
+    rows = soup.find_all('tr')
+    
+    if len(rows) < 2:
+        raise ValueError(f"Fetched page but found no data tables. (Found {len(rows)} rows)")
+    
+    print(f"Successfully fetched {len(rows)} rows using proxy!")
+    return rows
+
 def main():
     print("Running smart results monitor...")
-    
-    # 1. Load historical memory
     previous_results = load_announced_results()
     
-    # 2. Scrape the website via Proxy Bypasses
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+    }
+    
     rows = []
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        
-        print("Attempting to bypass firewall using Proxy...")
-        proxy_url = f"https://api.allorigins.win/raw?url={URL}"
-        
-        response = requests.get(proxy_url, headers=headers, timeout=60)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        rows = soup.find_all('tr')
-        
-        if len(rows) < 2:
-            raise ValueError("No table found via proxy.")
-            
-    except Exception as e:
-        print(f"Proxy bypass failed: {e}")
-        print("Attempting secondary bypass route...")
+    
+    # 3 مسارات بديلة لتخطي جدار الكلية
+    proxies = [
+        "https://api.allorigins.win/raw?url=TARGET_URL",
+        "https://api.codetabs.com/v1/proxy?quest=TARGET_URL",
+        "https://corsproxy.io/?TARGET_URL"
+    ]
+    
+    success = False
+    for i, proxy in enumerate(proxies):
+        print(f"Attempting bypass route {i+1}...")
         try:
-            proxy_url_2 = f"https://api.codetabs.com/v1/proxy?quest={URL}"
-            response = requests.get(proxy_url_2, headers=headers, timeout=60)
-            soup = BeautifulSoup(response.content, 'html.parser')
-            rows = soup.find_all('tr')
-        except Exception as e2:
-            print(f"Total connection failure. The university server is likely completely down or blocking all proxies: {e2}")
-            return
+            rows = fetch_with_proxy(proxy, headers)
+            success = True
+            break
+        except Exception as e:
+            print(f"Route {i+1} failed: {e}")
+            
+    if not success:
+        print("All proxy routes failed. The university site might be completely down or heavily blocking.")
+        return
 
     year_columns = {
         1: "الفرقة الأولي",
@@ -74,7 +90,7 @@ def main():
     current_visible_results = set()
     new_releases = []
 
-    # 3. Parse the table structure
+    # Parse the table structure
     for row in rows:
         cells = row.find_all(['td', 'th'])
         if not cells:
@@ -96,7 +112,8 @@ def main():
                 if identifier not in previous_results:
                     new_releases.append((dept_name, year_name))
 
-    # --- CRITICAL LOGIC CHECKS ---
+    # سجل دقيق لما يراه السكربت
+    print(f"Found {len(current_visible_results)} total checkboxes on the current page.")
 
     # CONDITION 1: Portal Reset Detected
     if len(current_visible_results) == 0 and len(previous_results) > 0:
@@ -108,7 +125,6 @@ def main():
             f"🔗 تابع هنا: {URL}"
         )
         send_telegram_message(reset_msg)
-        
         if os.path.exists(STATE_FILE):
             os.remove(STATE_FILE)
         return
@@ -117,12 +133,10 @@ def main():
     if new_releases:
         if len(previous_results) == 0:
             print(f"Initial run test: Found {len(new_releases)} existing results. Sending summary batch...")
-            
             batch_size = 15
             for i in range(0, len(new_releases), batch_size):
                 batch = new_releases[i:i+batch_size]
                 summary_lines = [f"• {dept} ({year})" for dept, year in batch]
-                
                 msg = (
                     f"🚀 <b>تم تحديث صفحة النتائج</b>\n"
                     f"النتائج المتوفرة حالياً على الموقع:\n\n"
@@ -140,7 +154,6 @@ def main():
                     f"🔗 رابط النتيجة: {URL}"
                 )
                 send_telegram_message(msg)
-
         save_all_announced_results(current_visible_results)
     else:
         print("Scan complete. No changes on the portal.")
