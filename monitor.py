@@ -1,49 +1,40 @@
 import os
-import asyncio
-from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 import requests
+from bs4 import BeautifulSoup
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 STATE_FILE = "announced_results.txt"
-URL = "http://www.results.eng.cu.edu.eg/"
+# تم تحديث الرابط لاستخدام ScraperAPI المجاني
+SCRAPER_API_KEY = "4223d70638541e4d6a455a297e681c2d"
+TARGET_URL = "http://www.results.eng.cu.edu.eg/"
+API_URL = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={TARGET_URL}"
 
 def send_telegram_message(text):
     api_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'HTML'}
     requests.post(api_url, json=payload)
 
-async def main():
-    print("بدء محاولة الفحص (المتصفح المموه)...")
-    
-    # تحميل الذاكرة السابقة
+def main():
+    print("جاري الفحص عبر خدمة ScraperAPI...")
+    try:
+        response = requests.get(API_URL, timeout=60)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+    except Exception as e:
+        print(f"فشل الاتصال عبر API: {e}")
+        return
+
+    rows = soup.find_all('tr')
     previous_results = set()
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             previous_results = set(line.strip() for line in f if line.strip())
 
-    async with async_playwright() as p:
-        # تشغيل المتصفح مع بصمة متصفح حقيقية (Firefox) لتجاوز جدار الحماية
-        browser = await p.firefox.launch(headless=True)
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
-        page = await context.new_page()
-        
-        try:
-            # انتظار تحميل DOM فقط لضمان السرعة مع زيادة وقت الانتظار
-            await page.goto(URL, timeout=120000, wait_until="domcontentloaded")
-            content = await page.content()
-            soup = BeautifulSoup(content, 'html.parser')
-        except Exception as e:
-            print(f"فشل التحميل بعد محاولات: {e}")
-            return
-        finally:
-            await browser.close()
-
-    rows = soup.find_all('tr')
     current_visible_results = set()
     new_releases = []
     
+    # تحليل الجدول (نفس المنطق القوي السابق)
     year_columns = {1: "الفرقة الأولي", 2: "الفرقة الثانية", 3: "الفرقة الثالثة", 4: "الفرقة الرابعة"}
     for row in rows:
         cells = row.find_all(['td', 'th'])
@@ -58,15 +49,14 @@ async def main():
                 if identifier not in previous_results:
                     new_releases.append(identifier)
 
-    # التبليغ
     if new_releases:
         print(f"تم العثور على {len(new_releases)} نتائج جديدة!")
         for res in new_releases:
-            send_telegram_message(f"📢 <b>نتيجة جديدة:</b>\n{res}\n\n🔗 {URL}")
+            send_telegram_message(f"📢 <b>نتيجة جديدة:</b>\n{res}\n\n🔗 {TARGET_URL}")
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             for item in sorted(current_visible_results): f.write(f"{item}\n")
     else:
-        print("Scan complete. لا توجد نتائج جديدة.")
+        print("الفحص اكتمل. لا توجد نتائج جديدة.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
