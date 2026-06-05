@@ -1,7 +1,6 @@
 import requests
-import soup = BeautifulSoup(response.content, 'html.parser')
+from bs4 import BeautifulSoup
 import os
-import time
 
 # --- Configuration via Environment Variables ---
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
