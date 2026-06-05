@@ -1,10 +1,11 @@
 import requests
-from bs4 import BeautifulSoup
+import soup = BeautifulSoup(response.content, 'html.parser')
 import os
+import time
 
-# --- Configuration via Environment Variables (For Security) ---
+# --- Configuration via Environment Variables ---
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") # e.g., "@cu_eng_results"
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 STATE_FILE = "announced_results.txt"
 URL = "http://www.results.eng.cu.edu.eg/"
 
@@ -24,75 +25,106 @@ def load_announced_results():
             return set(line.strip() for line in f if line.strip())
     return set()
 
-def save_announced_result(result_key):
-    with open(STATE_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{result_key}\n")
+def save_all_announced_results(announced_set):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        for item in sorted(announced_set):
+            f.write(f"{item}\n")
 
-def check_all_results(announced_set):
+def main():
+    print("Running smart results monitor...")
+    
+    # 1. Load historical memory
+    previous_results = load_announced_results()
+    
+    # 2. Scrape the website
     try:
         response = requests.get(URL, timeout=15)
         soup = BeautifulSoup(response.content, 'html.parser')
         rows = soup.find_all('tr')
-        
-        year_columns = {
-            1: "الفرقة الأولي",
-            2: "الفرقة الثانية",
-            3: "الفرقة الثالثة",
-            4: "الفرقة الرابعة"
-        }
-        
-        new_releases = []
-
-        for row in rows:
-            cells = row.find_all(['td', 'th'])
-            if not cells:
-                continue
-                
-            dept_name = cells[0].get_text(strip=True)
-            if "الفرقة" in dept_name or "القسم" in dept_name:
-                continue
-            
-            for year_idx in range(1, min(5, len(cells))):
-                cell = cells[year_idx]
-                checkbox = cell.find('input', {'type': 'checkbox'})
-                
-                if checkbox:
-                    year_name = year_columns.get(year_idx, f"الفرقة {year_idx}")
-                    identifier = f"{dept_name} - {year_name}"
-                    
-                    if identifier not in announced_set:
-                        new_releases.append((dept_name, year_name))
-                        announced_set.add(identifier)
-                        save_announced_result(identifier)
-                        
-        return new_releases
     except Exception as e:
-        print(f"Error scanning site: {e}")
-        return []
+        print(f"Error fetching or parsing the website: {e}")
+        return
 
-def main():
-    print("Running scheduled results scan...")
-    announced_set = load_announced_results()
+    year_columns = {
+        1: "الفرقة الأولي",
+        2: "الفرقة الثانية",
+        3: "الفرقة الثالثة",
+        4: "الفرقة الرابعة"
+    }
     
-    # If the history file doesn't exist yet, create an empty one
-    if not os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            f.write("")
+    current_visible_results = set()
+    new_releases = []
+
+    # 3. Parse the table structure
+    for row in rows:
+        cells = row.find_all(['td', 'th'])
+        if not cells:
+            continue
             
-    new_updates = check_all_results(announced_set)
-    
-    if new_updates:
-        for dept, year in new_updates:
-            msg = (
-                f"📢 <b>نتيجة جديدة ظهرت الآن!</b>\n\n"
-                f"🏢 <b>القسم:</b> {dept}\n"
-                f"🎓 <b>السنة الدراسية:</b> {year}\n\n"
-                f"🔗 رابط النتيجة: {URL}"
-            )
-            print(f"Posting update to channel: {dept} - {year}")
-            send_telegram_message(msg)
+        dept_name = cells[0].get_text(strip=True)
+        if "الفرقة" in dept_name or "القسم" in dept_name:
+            continue
+        
+        for year_idx in range(1, min(5, len(cells))):
+            cell = cells[year_idx]
+            checkbox = cell.find('input', {'type': 'checkbox'})
+            
+            if checkbox:
+                year_name = year_columns.get(year_idx, f"الفرقة {year_idx}")
+                identifier = f"{dept_name} - {year_name}"
+                current_visible_results.add(identifier)
+                
+                if identifier not in previous_results:
+                    new_releases.append((dept_name, year_name))
+
+    # --- CRITICAL LOGIC CHECKS ---
+
+    # CONDITION 1: Portal Reset Detected
+    if len(current_visible_results) == 0 and len(previous_results) > 0:
+        print("Portal reset detected! All checkboxes were removed by the faculty.")
+        reset_msg = (
+            "🔄 <b>تم تحديث صفحة النتائج</b>\n\n"
+            "❌ تم مسح علامات نتائج الترم السابق من المنصة.\n"
+            "⏳ الموقع الآن جاهز وفي انتظار رفع نتائج الترم الحالي. بالتوفيق للجميع! \n\n"
+            f"🔗 تابع هنا: {URL}"
+        )
+        send_telegram_message(reset_msg)
+        
+        if os.path.exists(STATE_FILE):
+            os.remove(STATE_FILE)
+        return
+
+    # CONDITION 2: New Results Found (or initial setup test run)
+    if new_releases:
+        if len(previous_results) == 0:
+            print(f"Initial run test: Found {len(new_releases)} existing results. Sending summary batch...")
+            
+            batch_size = 15
+            for i in range(0, len(new_releases), batch_size):
+                batch = new_releases[i:i+batch_size]
+                summary_lines = [f"• {dept} ({year})" for dept, year in batch]
+                
+                msg = (
+                    f"🚀 <b>تم تحديث صفحة النتائج</b>\n"
+                    f"النتائج المتوفرة حالياً على الموقع:\n\n"
+                    + "\n".join(summary_lines) +
+                    f"\n\n🔗 رابط المنصة: {URL}"
+                )
+                send_telegram_message(msg)
+        else:
+            print(f"Found {len(new_releases)} brand new results!")
+            for dept, year in new_releases:
+                msg = (
+                    f"📢 <b>تم تحديث صفحة النتائج</b>\n\n"
+                    f"🏢 <b>القسم:</b> {dept}\n"
+                    f"🎓 <b>السنة الدراسية:</b> {year}\n\n"
+                    f"🔗 رابط النتيجة: {URL}"
+                )
+                send_telegram_message(msg)
+
+        save_all_announced_results(current_visible_results)
     else:
-        print("Scan complete. No new results found.")
+        print("Scan complete. No changes on the portal.")
 
 if __name__ == "__main__":
     main()
