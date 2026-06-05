@@ -2,10 +2,15 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
+# Setup
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 STATE_FILE = "announced_results.txt"
-URL = "http://www.results.eng.cu.edu.eg/"
+TARGET_URL = "http://www.results.eng.cu.edu.eg/"
+
+# ZenRows API settings for firewall bypass
+ZENROWS_API_KEY = "8f03104e76d915442e0539f170f7cf4a3055452d"
+ZENROWS_URL = f"https://api.zenrows.com/v1/?apikey={ZENROWS_API_KEY}&url={TARGET_URL}&js_render=true&premium_proxy=true"
 
 def send_telegram_message(text):
     api_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -13,26 +18,17 @@ def send_telegram_message(text):
     requests.post(api_url, json=payload)
 
 def main():
-    print("Starting stealth scan...")
-    # These headers make the request look like a real Chrome browser on Windows
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-        "Referer": "http://www.google.com/"
-    }
-    
+    print("Starting secure bypass scan...")
     try:
-        # Direct request with stealth headers
-        response = requests.get(URL, headers=headers, timeout=30)
+        # Fetching via proxy
+        response = requests.get(ZENROWS_URL, timeout=90)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
     except Exception as e:
-        print(f"Connection failed: {e}")
+        print(f"Bypass failed: {e}")
         return
 
-    rows = soup.find_all('tr')
-    # [Rest of your extraction logic remains the same]
+    # Load history
     previous_results = set()
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -42,6 +38,8 @@ def main():
     new_releases = []
     year_columns = {1: "الفرقة الأولي", 2: "الفرقة الثانية", 3: "الفرقة الثالثة", 4: "الفرقة الرابعة"}
     
+    # Parse table
+    rows = soup.find_all('tr')
     for row in rows:
         cells = row.find_all(['td', 'th'])
         if not cells or len(cells) < 2: continue
@@ -50,14 +48,16 @@ def main():
         
         for year_idx in range(1, min(5, len(cells))):
             if cells[year_idx].find('input', {'type': 'checkbox'}):
-                identifier = f"{dept_name} - {year_columns.get(year_idx, 'الفرقة ' + str(year_idx))}"
+                identifier = f"{dept_name} - {year_columns.get(year_idx, f'الفرقة {year_idx}')}"
                 current_visible_results.add(identifier)
                 if identifier not in previous_results:
                     new_releases.append(identifier)
 
+    # Notify and Save
     if new_releases:
+        print(f"Found {len(new_releases)} new results!")
         for res in new_releases:
-            send_telegram_message(f"📢 <b>New Result:</b>\n{res}\n\n🔗 {URL}")
+            send_telegram_message(f"📢 <b>New Result Announced:</b>\n{res}\n\n🔗 {TARGET_URL}")
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             for item in sorted(current_visible_results): f.write(f"{item}\n")
     else:
