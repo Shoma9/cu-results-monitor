@@ -5,10 +5,7 @@ from bs4 import BeautifulSoup
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 STATE_FILE = "announced_results.txt"
-# تم تحديث الرابط لاستخدام ScraperAPI المجاني
-SCRAPER_API_KEY = "4223d70638541e4d6a455a297e681c2d"
-TARGET_URL = "http://www.results.eng.cu.edu.eg/"
-API_URL = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={TARGET_URL}"
+URL = "http://www.results.eng.cu.edu.eg/"
 
 def send_telegram_message(text):
     api_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -16,16 +13,26 @@ def send_telegram_message(text):
     requests.post(api_url, json=payload)
 
 def main():
-    print("جاري الفحص عبر خدمة ScraperAPI...")
+    print("Starting stealth scan...")
+    # These headers make the request look like a real Chrome browser on Windows
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+        "Referer": "http://www.google.com/"
+    }
+    
     try:
-        response = requests.get(API_URL, timeout=60)
+        # Direct request with stealth headers
+        response = requests.get(URL, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
     except Exception as e:
-        print(f"فشل الاتصال عبر API: {e}")
+        print(f"Connection failed: {e}")
         return
 
     rows = soup.find_all('tr')
+    # [Rest of your extraction logic remains the same]
     previous_results = set()
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -33,9 +40,8 @@ def main():
 
     current_visible_results = set()
     new_releases = []
-    
-    # تحليل الجدول (نفس المنطق القوي السابق)
     year_columns = {1: "الفرقة الأولي", 2: "الفرقة الثانية", 3: "الفرقة الثالثة", 4: "الفرقة الرابعة"}
+    
     for row in rows:
         cells = row.find_all(['td', 'th'])
         if not cells or len(cells) < 2: continue
@@ -50,13 +56,12 @@ def main():
                     new_releases.append(identifier)
 
     if new_releases:
-        print(f"تم العثور على {len(new_releases)} نتائج جديدة!")
         for res in new_releases:
-            send_telegram_message(f"📢 <b>نتيجة جديدة:</b>\n{res}\n\n🔗 {TARGET_URL}")
+            send_telegram_message(f"📢 <b>New Result:</b>\n{res}\n\n🔗 {URL}")
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             for item in sorted(current_visible_results): f.write(f"{item}\n")
     else:
-        print("الفحص اكتمل. لا توجد نتائج جديدة.")
+        print("Scan complete. No new results found.")
 
 if __name__ == "__main__":
     main()
