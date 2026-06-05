@@ -1,3 +1,34 @@
+import requests
+from bs4 import BeautifulSoup
+import os
+
+# --- Configuration via Environment Variables ---
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+STATE_FILE = "announced_results.txt"
+URL = "http://www.results.eng.cu.edu.eg/"
+
+def send_telegram_message(text):
+    api_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    try:
+        payload = {'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'HTML'}
+        response = requests.post(api_url, json=payload)
+        if response.status_code != 200:
+            print(f"Telegram error: {response.text}")
+    except Exception as e:
+        print(f"Failed to send message: {e}")
+
+def load_announced_results():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return set(line.strip() for line in f if line.strip())
+    return set()
+
+def save_all_announced_results(announced_set):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        for item in sorted(announced_set):
+            f.write(f"{item}\n")
+
 def main():
     print("Running smart results monitor...")
     
@@ -12,14 +43,12 @@ def main():
         }
         
         print("Attempting to bypass firewall using Proxy...")
-        # We route the URL through a free public proxy to hide GitHub's IP address
         proxy_url = f"https://api.allorigins.win/raw?url={URL}"
         
         response = requests.get(proxy_url, headers=headers, timeout=60)
         soup = BeautifulSoup(response.content, 'html.parser')
         rows = soup.find_all('tr')
         
-        # If the proxy fails to grab the table, it will trigger an error
         if len(rows) < 2:
             raise ValueError("No table found via proxy.")
             
@@ -27,7 +56,6 @@ def main():
         print(f"Proxy bypass failed: {e}")
         print("Attempting secondary bypass route...")
         try:
-            # Fallback to a second free proxy just in case the first one is blocked
             proxy_url_2 = f"https://api.codetabs.com/v1/proxy?quest={URL}"
             response = requests.get(proxy_url_2, headers=headers, timeout=60)
             soup = BeautifulSoup(response.content, 'html.parser')
